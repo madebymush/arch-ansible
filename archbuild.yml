@@ -1,0 +1,162 @@
+---
+- hosts: localhost
+  become: true
+  gather_facts: false
+  vars:
+    dotfiles: /home/mush/dotfiles
+    home_dir: /home/mush
+    home_user: mush
+
+  tasks:
+    - name: Installing core pacman packages
+      pacman:
+        name:
+          - base-devel
+          - screen
+          - zsh
+          - i3-gaps
+          - polybar
+          - picom
+          - ranger
+          - alsa-utils
+          - wget
+          - curl
+          - feh
+          - rofi
+          - lightdm
+          - lightdm-slick-greeter
+          - xorg-xrandr
+          - git
+          - python3
+          - python-pip
+          - python-pexpect
+          - spotify-launcher
+          - exa
+          - npm
+          - net-tools
+          - hydra
+          - wireshark-qt
+          - zsh-autosuggestions
+          - zsh-syntax-highlighting
+          - tmux
+          - alacritty
+          - nmap
+          - plocate
+          - btop
+          - tcpdump
+        state: present
+        update_cache: true
+      tags: install, packages, pacman
+
+    - name: Update sudoers
+      copy:
+        content: "mush ALL=(ALL) NOPASSWD: ALL"
+        dest: /etc/sudoers.d/mush
+      tags: sudo
+
+    - name: Clone paru
+      git:
+        repo: https://aur.archlinux.org/paru.git
+        dest: /opt/paru
+      tags: paru
+
+    - name: Prep paru
+      shell: chown -R mush:mush /opt/paru
+      tags: paru
+
+    - name: Install paru
+      command: makepkg --noconfirm -si
+      become: false
+      args:
+        chdir: /opt/paru
+      tags: paru
+
+    - name: Run paru
+      expect:
+        command: paru
+        timeout: 300
+        responses:
+          Y/n: Y
+      become: false
+      tags: paru
+
+    - name: Install AUR Packages
+      command: paru --noconfirm --needed -S {{ item }}
+      with_items:
+        - librewolf-bin
+        - discord
+        - medusa
+        - oh-my-zsh-git
+      become_user: "{{ home_user }}"
+      tags: aur
+
+    - name: Make Directories
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ home_user }}"
+        group: "{{ home_user }}"
+        mode: "0755"
+      with_items:
+        - { path: "{{ home_dir }}/.config" }
+        - { path: "{{ home_dir }}/.config/polybar" }
+        - { path: "{{ home_dir }}/.config/nvim" }
+        - { path: "{{ home_dir }}/.config/alacritty" }
+        - { path: "{{ home_dir }}/.config/rofi" }
+        - { path: "{{ home_dir }}/.config/dunst" }
+        - { path: "{{ home_dir }}/.config/i3" }
+        - { path: "{{ home_dir }}/.config/picom" }
+        - { path: "{{ home_dir }}/.local/share/nvim/backup" }
+      tags: dotfiles, folders
+
+    - name: Link dotfiles
+      file:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: "{{ home_user }}"
+        group: "{{ home_user }}"
+        mode: "0644"
+        force: true
+        state: link
+      with_items:
+        - { src: "{{ dotfiles }}/tmux/tmux.conf", dest: "{{ home_dir }}/.tmux.conf" }
+        - { src: "{{ dotfiles }}/zsh/zshrc", dest: "{{ home_dir}}/.zshrc" }
+        - { src: "{{ dotfiles }}/nvim/init.vim", dest: "{{ home_dir}}/.config/nvim/init.vim" }
+        - { src: "{{ dotfiles }}/i3/config", dest: "{{ home_dir}}/.config/i3/config" }
+        - { src: "{{ dotfiles }}/oh-my-zsh/pi.zsh-theme", dest: "/usr/share/oh-my-zsh/themes/pi.zsh-theme" }
+        - { src: "{{ dotfiles }}/aliases/bash_aliases", dest: "{{ home_dir}}/.bash_aliases" }
+        - { src: "{{ dotfiles }}/alacritty/alacritty.yml", dest: "{{ home_dir}}/.config/alacritty/alacritty.yml" }
+        - { src: "{{ dotfiles }}/polybar/config", dest: "{{ home_dir}}/.config/polybar/config" }
+        - { src: "{{ dotfiles }}/dunst/dunstrc", dest: "{{ home_dir}}/.config/dunst/dunstrc" }
+        - { src: "{{ dotfiles }}/rofi/themes/tokyonight.rasi", dest: "{{ home_dir}}/.config/rofi/tokyonight.rasi" }
+      tags: dotfiles, symlinks
+
+    - name: Set zsh as default shell
+      user:
+        name: "{{ home_user }}"
+        shell: /bin/zsh
+      tags: zsh
+
+
+    - name: Check for Vim-Plug
+      stat:
+        path: "{{ home_dir }}/.local/share/nvim/site/autoload/plug.vim"
+      register: plug_exists
+      become_user: "{{ home_user }}"
+      tags: vim, install
+
+    - name: Install Vim-Plug
+      shell: sh -c 'curl -fLo "${XDG_DATA_HOME:-$HOME/.local/share}"/nvim/site/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
+      become_user: "{{ home_user }}"
+      when: plug_exists.stat.exists == false
+      tags: vim, install
+
+    - name: Install Vim Plugins
+      command: nvim --headless -E -s -c "source {{ home_dir }}/.config/nvim/init.vim" +PlugInstall +qa
+      become_user: "{{ home_user }}"
+      ignore_errors: true
+      tags: vim, install
+
+    - name: Install pyright LSP
+      command: npm i -g pyright
+      tags: vim, install, lsp
